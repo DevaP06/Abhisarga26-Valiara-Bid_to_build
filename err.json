@@ -1,0 +1,1 @@
+{"stack":"error: Tenant or user not found\n    at D:\\Abhisarga26-Valiara-Bid_to_build\\node_modules\\pg-pool\\index.js:45:11\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)","message":"Tenant or user not found","length":52,"name":"error","severity":"FATAL","code":"XX000"}
