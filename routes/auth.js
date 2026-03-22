@@ -11,7 +11,7 @@ router.post('/login', catchErrors(async (req, res) => {
   const { username, password } = req.body;
   const db = await getDb();
 
-  const user = await db.get('SELECT * FROM users WHERE username = ?', [username]);
+  const user = await db.get('SELECT * FROM users WHERE username = $1', [username]);
 
   if (!user) {
     req.session.errorMsg = 'Invalid username or password.';
@@ -30,13 +30,13 @@ router.post('/login', catchErrors(async (req, res) => {
   
   // Create team if they are a 'team' user and don't have one
   if (user.role === 'team') {
-    let team = await db.get('SELECT * FROM teams WHERE user_id = ?', [user.id]);
+    let team = await db.get('SELECT * FROM teams WHERE user_id = $1', [user.id]);
     
     // Auto-create a team if it doesn't exist
     if (!team) {
       const teamName = `${user.username}_team`;
-      await db.run('INSERT INTO teams (team_name, user_id) VALUES (?, ?)', [teamName, user.id]);
-      team = await db.get('SELECT * FROM teams WHERE user_id = ?', [user.id]);
+      await db.run('INSERT INTO teams (team_name, user_id) VALUES ($1, $2)', [teamName, user.id]);
+      team = await db.get('SELECT * FROM teams WHERE user_id = $1', [user.id]);
     }
     
     req.session.team = { id: team.id, team_name: team.team_name, purse: team.purse_remaining };
