@@ -20,13 +20,13 @@ router.get('/dashboard', catchAsync(async (req, res) => {
   const teamId = req.session.team.id;
   
   // Refresh team data
-  const team = await db.get('SELECT * FROM teams WHERE id = ?', [teamId]);
+  const team = await db.get('SELECT * FROM teams WHERE id = $1', [teamId]);
   req.session.team.purse = team.purse_remaining; // Update session just in case
   
   const systemControl = await db.get('SELECT * FROM system_control LIMIT 1');
   let liveCompany = null;
   if (systemControl && systemControl.live_company_id) {
-    liveCompany = await db.get('SELECT * FROM companies WHERE id = ?', [systemControl.live_company_id]);
+    liveCompany = await db.get('SELECT * FROM companies WHERE id = $1', [systemControl.live_company_id]);
   }
   
   // Get owned companies
@@ -34,7 +34,7 @@ router.get('/dashboard', catchAsync(async (req, res) => {
     SELECT companies.*, bids.bid_amount, bids.assigned_at 
     FROM bids 
     JOIN companies ON bids.company_id = companies.id 
-    WHERE bids.team_id = ?
+    WHERE bids.team_id = $1
     ORDER BY bids.assigned_at DESC
   `, [teamId]);
 
@@ -83,11 +83,11 @@ router.get('/allocate', catchAsync(async (req, res) => {
     SELECT companies.id, companies.name 
     FROM bids 
     JOIN companies ON bids.company_id = companies.id 
-    WHERE bids.team_id = ?
+    WHERE bids.team_id = $1
   `, [teamId]);
 
   // See if already allocated
-  const existingAllocations = await db.all('SELECT * FROM allocations WHERE team_id = ?', [teamId]);
+  const existingAllocations = await db.all('SELECT * FROM allocations WHERE team_id = $1', [teamId]);
   
   res.render('allocation', {
     ownedCompanies,
@@ -107,14 +107,14 @@ router.post('/allocate', catchAsync(async (req, res) => {
   }
 
   // Check if they already allocated
-  const existing = await db.get('SELECT * FROM allocations WHERE team_id = ?', [teamId]);
+  const existing = await db.get('SELECT * FROM allocations WHERE team_id = $1', [teamId]);
   if (existing) {
     req.session.errorMsg = 'You have already submitted your allocations.';
     return res.redirect('/team/allocate');
   }
 
   // Example body: { 'company_1': '50000', 'company_3': '50000' }
-  const totalPurse = await db.get('SELECT purse_remaining FROM teams WHERE id = ?', [teamId]);
+  const totalPurse = await db.get('SELECT purse_remaining FROM teams WHERE id = $1', [teamId]);
   let sum = 0;
   const allocationData = [];
 
@@ -146,14 +146,14 @@ router.post('/allocate', catchAsync(async (req, res) => {
   }
 
   // Insert allocations
-  await db.exec('BEGIN TRANSACTION');
+  await db.exec('BEGIN');
   try {
     for (let alloc of allocationData) {
       // Validate they actually own this company
-      const checkOwns = await db.get('SELECT * FROM bids WHERE team_id = ? AND company_id = ?', [teamId, alloc.companyId]);
+      const checkOwns = await db.get('SELECT * FROM bids WHERE team_id = $1 AND company_id = $2', [teamId, alloc.companyId]);
       if (!checkOwns) throw new Error('You do not own this company.');
 
-      await db.run('INSERT INTO allocations (team_id, company_id, allocated_amount) VALUES (?, ?, ?)', 
+      await db.run('INSERT INTO allocations (team_id, company_id, allocated_amount) VALUES ($1, $2, $3)', 
         [teamId, alloc.companyId, alloc.amount]);
     }
     await db.exec('COMMIT');
