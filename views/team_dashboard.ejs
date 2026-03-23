@@ -8,8 +8,8 @@
   <div class="col-md-4 text-md-end mt-3 mt-md-0">
     <div class="card bg-dark text-white shadow-lg border-0 rounded-4">
       <div class="card-body p-4">
-        <h6 class="text-uppercase text-gray-400 fw-bold mb-1">Remaining Purse</h6>
-        <h2 class="fw-bold mb-0 text-success">$<%= team.purse_remaining.toLocaleString() %></h2>
+        <h6 class="text-uppercase text-gray-400 fw-bold mb-1"><%= currentPhase === 'allocation' ? 'Allocatable Purse' : 'Bidding Purse' %></h6>
+        <h2 class="fw-bold mb-0 text-success">$<%= currentPhase === 'allocation' ? (team.allocation_purse||0).toLocaleString() : team.purse_remaining.toLocaleString() %></h2>
       </div>
     </div>
   </div>
@@ -81,12 +81,118 @@
 
 <% if (currentPhase === 'allocation') { %>
   <div class="row mt-5">
-    <div class="col-12 text-center">
+    <div class="col-12 text-center mb-4">
       <div class="card bg-warning text-dark border-0 rounded-4 shadow-sm">
         <div class="card-body py-4">
           <h4 class="fw-bold"><i class="bi bi-exclamation-triangle-fill me-2"></i>Allocation Phase is LIVE</h4>
           <p class="fs-5 mb-4">You must allocate your remaining purse across your owned companies.</p>
           <a href="/team/allocate" class="btn btn-dark btn-lg rounded-pill px-5 fw-bold shadow">Go to Allocation Panel</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trade Market -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card shadow-lg border-0 rounded-4 mb-4">
+        <div class="card-header bg-dark text-white rounded-top-4 py-3">
+          <h4 class="fw-bold mb-0"><i class="bi bi-arrow-left-right me-2"></i>Inter-Team Trading Floor</h4>
+        </div>
+        <div class="card-body p-4">
+          <div class="row g-4">
+            
+            <!-- Propose Trade Form -->
+            <div class="col-lg-5 border-end border-2 pe-lg-4">
+              <h5 class="fw-bold text-primary mb-3">Propose a Trade</h5>
+              <form action="/team/propose-trade" method="POST">
+                <div class="mb-3">
+                  <label class="form-label text-sm fw-semibold text-muted">Target Company (from Market)</label>
+                  <select name="target_company_id" class="form-select form-select-lg rounded-3 border-primary border-opacity-25" required>
+                    <option value="">Select Company</option>
+                    <% market.forEach(m => { %>
+                      <option value="<%= m.id %>"><%= m.company_name %> (Owned by <%= m.owner_team_name %>)</option>
+                    <% }) %>
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label text-sm fw-semibold text-muted">Cash Offered (From Allocation Purse)</label>
+                  <div class="input-group input-group-lg shadow-sm">
+                    <span class="input-group-text bg-light border-0 text-secondary fw-bold">$</span>
+                    <input type="number" step="0.01" name="offered_cash" class="form-control border-0 bg-light" value="0" min="0" max="<%= team.allocation_purse %>" required>
+                  </div>
+                </div>
+                <div class="mb-4">
+                  <label class="form-label text-sm fw-semibold text-muted">Include Company (Optional)</label>
+                  <select name="offered_company_id" class="form-select form-select-lg rounded-3 border-secondary border-opacity-25">
+                    <option value="">None (Cash Only)</option>
+                    <% ownedCompanies.forEach(c => { %>
+                      <option value="<%= c.id %>"><%= c.name %></option>
+                    <% }) %>
+                  </select>
+                </div>
+                <button type="submit" class="btn btn-primary btn-lg w-100 rounded-pill fw-bold shadow-sm">Send Trade Offer</button>
+              </form>
+            </div>
+
+            <!-- Trade Inboxes -->
+            <div class="col-lg-7 ps-lg-4">
+              <h5 class="fw-bold text-success mb-3"><i class="bi bi-inbox-fill me-2"></i>Inbound Trade Requests</h5>
+              <% if (inboundTrades.length === 0) { %>
+                <div class="alert alert-light text-muted text-center py-4 border-0 rounded-4 mb-4">
+                  <i class="bi bi-emoji-sunglasses opacity-50 fs-2 mb-2"></i>
+                  <p class="mb-0">No incoming trade requests right now.</p>
+                </div>
+              <% } else { %>
+                <div class="list-group mb-4">
+                  <% inboundTrades.forEach(trade => { %>
+                    <div class="list-group-item rounded-4 mb-2 shadow-sm border border-success border-opacity-25 p-3">
+                      <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                          <span class="badge bg-warning text-dark mb-2 px-3 py-2 rounded-pill shadow-sm"><i class="bi bi-person-fill me-1"></i>From: <%= trade.initiator_name %></span><br>
+                          <span class="fw-semibold text-secondary">They Want:</span> <span class="fw-bold text-dark fs-5"><%= trade.target_company_name %></span><br>
+                          <span class="fw-semibold text-secondary">They Offer:</span> 
+                          <span class="fw-bold text-success fs-5">
+                            <% if (trade.offered_company_name) { %>
+                              <%= trade.offered_company_name %> + 
+                            <% } %>
+                            $<%= trade.offered_cash.toLocaleString() %>
+                          </span>
+                        </div>
+                        <div class="d-flex flex-column gap-2 ms-3">
+                          <form action="/team/respond-trade" method="POST" class="m-0">
+                            <input type="hidden" name="trade_id" value="<%= trade.id %>">
+                            <input type="hidden" name="action" value="accepted">
+                            <button type="submit" class="btn btn-success rounded-pill fw-bold w-100 shadow-sm"><i class="bi bi-check2-circle me-1"></i>Accept</button>
+                          </form>
+                          <form action="/team/respond-trade" method="POST" class="m-0">
+                            <input type="hidden" name="trade_id" value="<%= trade.id %>">
+                            <input type="hidden" name="action" value="rejected">
+                            <button type="submit" class="btn btn-outline-danger btn-sm rounded-pill fw-bold w-100"><i class="bi bi-x-circle me-1"></i>Decline</button>
+                          </form>
+                        </div>
+                      </div>
+                    </div>
+                  <% }) %>
+                </div>
+              <% } %>
+
+              <h5 class="fw-bold text-secondary mb-3 mt-4"><i class="bi bi-send-check-fill me-2"></i>Pending Sent Offers</h5>
+              <% if (outboundTrades.length === 0) { %>
+                <div class="alert alert-light text-muted text-center py-3 border-0 rounded-4">No outbound requests pending.</div>
+              <% } else { %>
+                <div class="list-group">
+                  <% outboundTrades.forEach(trade => { %>
+                    <div class="list-group-item bg-light text-muted rounded-4 border-0 mb-2 p-3">
+                      <span class="badge bg-secondary mb-2 rounded-pill">To: <%= trade.target_name %></span><br>
+                      Target: <span class="fw-bold text-dark"><%= trade.target_company_name %></span> | 
+                      Offer: <span class="fw-bold text-success"><%= trade.offered_company_name ? trade.offered_company_name + ' + ' : '' %>$<%= trade.offered_cash.toLocaleString() %></span>
+                    </div>
+                  <% }) %>
+                </div>
+              <% } %>
+            </div>
+          </div>
         </div>
       </div>
     </div>

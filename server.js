@@ -67,17 +67,31 @@ app.get('/login', (req, res) => {
 app.get('/leaderboard', async (req, res) => {
   const { getDb } = require('./db');
   const db = await getDb();
-  // We need to try catch the db call, but simpler here:
   try {
-    const scores = await db.all(`
-      SELECT scores.total_score, teams.team_name 
-      FROM scores 
-      JOIN teams ON scores.team_id = teams.id 
-      ORDER BY scores.total_score DESC
+    const teams = await db.all('SELECT * FROM teams ORDER BY team_name ASC');
+    const allocations = await db.all(`
+      SELECT allocations.team_id, allocations.allocated_amount, companies.name as company_name 
+      FROM allocations 
+      JOIN companies ON allocations.company_id = companies.id
     `);
-    res.render('leaderboard', { scores });
+    const bids = await db.all(`
+      SELECT bids.team_id, bids.bid_amount, companies.name as company_name 
+      FROM bids 
+      JOIN companies ON bids.company_id = companies.id
+    `);
+
+    // Attach holding data to each team
+    for (let t of teams) {
+      t.allocations = allocations.filter(a => a.team_id === t.id);
+      t.bids = bids.filter(b => b.team_id === t.id);
+      t.total_allocated = t.allocations.reduce((sum, a) => sum + a.allocated_amount, 0);
+      t.total_bidded = t.bids.reduce((sum, b) => sum + b.bid_amount, 0);
+    }
+
+    res.render('leaderboard', { teams });
   } catch(err) {
-    res.send("Error loading leaderboard.");
+    console.error(err);
+    res.send("Error loading portfolios.");
   }
 });
 

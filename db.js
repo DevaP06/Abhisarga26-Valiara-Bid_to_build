@@ -39,9 +39,14 @@ async function initDb() {
 
   try {
     await db.run("ALTER TABLE system_control ADD COLUMN live_company_id INTEGER REFERENCES companies(id)");
-  } catch (err) {
-    // Column already exists or table doesn't exist
-  }
+  } catch (err) {}
+  try { await db.run("ALTER TABLE system_control ADD COLUMN default_bidding_purse REAL DEFAULT 1000000.0"); } catch (err) {}
+  try { await db.run("ALTER TABLE system_control ADD COLUMN default_allocation_purse REAL DEFAULT 2000000.0"); } catch (err) {}
+  try { await db.run("ALTER TABLE teams ADD COLUMN allocation_purse REAL DEFAULT 0.0"); } catch (err) {}
+  
+  // Clean up legacy tables just in case they are clogging DB visually
+  try { await db.run("DROP TABLE IF EXISTS company_results"); } catch (err) {}
+  try { await db.run("DROP TABLE IF EXISTS scores"); } catch (err) {}
 
   console.log('Database initialized successfully.');
   
