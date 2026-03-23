@@ -82,11 +82,18 @@ router.post('/add-company', upload.single('pdf_doc'), catchAsync(async (req, res
   const db = await getDb();
 
   try {
-    await db.run('INSERT INTO companies (name, description, pdf_url) VALUES ($1, $2, $3)', [name, description, pdf_url]);
-    req.session.successMsg = 'Company added successfully.';
+    // Check if a company with this name already exists
+    const existing = await db.get('SELECT id FROM companies WHERE LOWER(name) = LOWER($1)', [name]);
+    if (existing) {
+      req.session.errorMsg = `A company named "${name}" already exists (ID: ${existing.id}).`;
+      return res.redirect('/admin/dashboard');
+    }
+    
+    await db.run('INSERT INTO companies (name, description, pdf_url) VALUES ($1, $2, $3)', [name, description || null, pdf_url]);
+    req.session.successMsg = `Company "${name}" added successfully!`;
   } catch (err) {
-    console.error("ADD COMPANY ERROR:", err.message);
-    req.session.errorMsg = 'Error adding company. Name might already exist or DB string error.';
+    console.error("ADD COMPANY FULL ERROR:", err);
+    req.session.errorMsg = `DB Error adding company: ${err.message}`;
   }
   res.redirect('/admin/dashboard');
 }));
@@ -130,11 +137,12 @@ router.post('/set-phase', catchAsync(async (req, res) => {
   const { phase } = req.body;
   const db = await getDb();
   
-  const sys = await db.get('SELECT current_phase FROM system_control LIMIT 1');
+  const sys = await db.get('SELECT current_phase, default_allocation_purse FROM system_control LIMIT 1');
   if (sys && sys.current_phase === 'auction' && phase === 'allocation') {
-    // Rollover cash upon transition
-    await db.run('UPDATE teams SET allocation_purse = allocation_purse + purse_remaining, purse_remaining = 0');
-    req.session.successMsg = `Phase changed to ${phase}. Unspent bidding funds rolled over to allocation purses.`;
+    // allocation_purse = leftover bidding money + the global default allocation purse
+    const defaultAlloc = sys.default_allocation_purse || 0;
+    await db.run('UPDATE teams SET allocation_purse = purse_remaining + $1, purse_remaining = 0', [defaultAlloc]);
+    req.session.successMsg = `Phase changed to ${phase}. Each team's allocation purse = leftover bid funds + $${defaultAlloc.toLocaleString()} default.`;
   } else {
     req.session.successMsg = `Phase changed to ${phase}.`;
   }
@@ -248,6 +256,25 @@ router.post('/revoke-bid', catchAsync(async (req, res) => {
   } catch (err) {
     await db.exec('ROLLBACK');
     req.session.errorMsg = 'Error revoking bid.';
+  }
+  res.redirect('/admin/dashboard');
+}));
+
+// POST /admin/reset-all-data
+router.post('/reset-all-data', catchAsync(async (req, res) => {
+  const db = await getDb();
+  try {
+    await db.run('DELETE FROM trades');
+    await db.run('DELETE FROM allocations');
+    await db.run('DELETE FROM bids');
+    await db.run('DELETE FROM teams');
+    await db.run('DELETE FROM companies');
+    await db.run("DELETE FROM users WHERE role != 'admin'");
+    await db.run("UPDATE system_control SET current_phase = 'closed', live_company_id = NULL");
+    req.session.successMsg = 'All data wiped successfully! Only admin account preserved.';
+  } catch (err) {
+    console.error("RESET ERROR:", err);
+    req.session.errorMsg = 'Error resetting data: ' + err.message;
   }
   res.redirect('/admin/dashboard');
 }));
