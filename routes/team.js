@@ -106,13 +106,6 @@ router.post('/allocate', catchAsync(async (req, res) => {
     return res.redirect('/team/dashboard');
   }
 
-  // Check if they already allocated
-  const existing = await db.get('SELECT * FROM allocations WHERE team_id = $1', [teamId]);
-  if (existing) {
-    req.session.errorMsg = 'You have already submitted your allocations.';
-    return res.redirect('/team/allocate');
-  }
-
   // Example body: { 'company_1': '50000', 'company_3': '50000' }
   const totalPurse = await db.get('SELECT purse_remaining FROM teams WHERE id = $1', [teamId]);
   let sum = 0;
@@ -123,8 +116,8 @@ router.post('/allocate', catchAsync(async (req, res) => {
       const companyId = parseInt(key.replace('company_', ''));
       const amount = parseFloat(req.body[key]);
       
-      if (amount < 0) {
-        req.session.errorMsg = 'Negative allocations are not allowed.';
+      if (isNaN(amount) || !isFinite(amount) || amount < 0) {
+        req.session.errorMsg = 'Invalid allocation amount detected.';
         return res.redirect('/team/allocate');
       }
       
@@ -133,21 +126,24 @@ router.post('/allocate', catchAsync(async (req, res) => {
     }
   }
 
-  // Must allocate exactly fixed amount (assuming purse is what's left, or total fixed amount?
-  // Requirements: "Allocate FULL amount (e.g., 100k)". Wait, the purse remaining AFTER auction is the amount to allocate?
-  // Or do they have to allocate completely? The requirement says:
-  // "Allocate FULL amount (e.g., 100k) Across owned companies ONLY"
-  // Let's assume they must allocate their exact remaining purse.
-  
   // Float precision issue mitigation
   if (Math.abs(sum - totalPurse.purse_remaining) > 0.1) {
     req.session.errorMsg = `You must allocate exactly your remaining purse: $${totalPurse.purse_remaining.toLocaleString()}`;
     return res.redirect('/team/allocate');
   }
 
-  // Insert allocations
+  // Use a transaction and row locking to prevent race conditions (double spend)
   await db.exec('BEGIN');
   try {
+    // Lock the team row so concurrent requests from the same team queue up here
+    await db.get('SELECT id FROM teams WHERE id = $1 FOR UPDATE', [teamId]);
+
+    // Check if they already allocated (inside the lock)
+    const existing = await db.get('SELECT * FROM allocations WHERE team_id = $1', [teamId]);
+    if (existing) {
+      throw new Error('You have already submitted your allocations.');
+    }
+
     for (let alloc of allocationData) {
       // Validate they actually own this company
       const checkOwns = await db.get('SELECT * FROM bids WHERE team_id = $1 AND company_id = $2', [teamId, alloc.companyId]);
