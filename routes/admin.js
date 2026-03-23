@@ -18,10 +18,16 @@ const requireAdmin = (req, res, next) => {
 
 router.use(requireAdmin);
 
+const fs = require('fs');
+const uploadDir = path.join(__dirname, '../public/uploads/');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
 // Setup multer for PDF uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, path.join(__dirname, '../public/uploads/'))
+    cb(null, uploadDir)
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
@@ -79,7 +85,8 @@ router.post('/add-company', upload.single('pdf_doc'), catchAsync(async (req, res
     await db.run('INSERT INTO companies (name, description, pdf_url) VALUES ($1, $2, $3)', [name, description, pdf_url]);
     req.session.successMsg = 'Company added successfully.';
   } catch (err) {
-    req.session.errorMsg = 'Error adding company. Name might already exist.';
+    console.error("ADD COMPANY ERROR:", err.message);
+    req.session.errorMsg = 'Error adding company. Name might already exist or DB string error.';
   }
   res.redirect('/admin/dashboard');
 }));
@@ -140,8 +147,15 @@ router.post('/set-phase', catchAsync(async (req, res) => {
 router.post('/update-default-purses', catchAsync(async (req, res) => {
   const { bidding_purse, allocation_purse } = req.body;
   const db = await getDb();
-  await db.run('UPDATE system_control SET default_bidding_purse = $1, default_allocation_purse = $2', [parseFloat(bidding_purse), parseFloat(allocation_purse)]);
-  req.session.successMsg = 'Global default purses updated successfully.';
+  const bp = parseFloat(bidding_purse);
+  const ap = parseFloat(allocation_purse);
+  
+  await db.run('UPDATE system_control SET default_bidding_purse = $1, default_allocation_purse = $2', [bp, ap]);
+  
+  // Retroactively apply the new default to all existing teams so the Admin sees immediate reflection
+  await db.run('UPDATE teams SET purse_remaining = $1, allocation_purse = $2', [bp, ap]);
+  
+  req.session.successMsg = 'Global default purses updated successfully and all existing teams were securely reset to these values.';
   res.redirect('/admin/dashboard');
 }));
 
@@ -149,7 +163,7 @@ router.post('/update-default-purses', catchAsync(async (req, res) => {
 router.post('/update-team-purse', catchAsync(async (req, res) => {
   const { team_id, bidding_purse, allocation_purse } = req.body;
   const db = await getDb();
-  await db.run('UPDATE teams SET purse_remaining = $1, allocation_purse = $2 WHERE id = $3', [parseFloat(bidding_purse), parseFloat(allocation_purse), team_id]);
+  await db.run('UPDATE teams SET purse_remaining = $1, allocation_purse = $2 WHERE id = $3', [parseFloat(bidding_purse), parseFloat(allocation_purse), parseInt(team_id)]);
   req.session.successMsg = 'Team purses updated successfully.';
   res.redirect('/admin/dashboard');
 }));

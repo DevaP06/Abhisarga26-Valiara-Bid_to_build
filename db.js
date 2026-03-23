@@ -48,6 +48,16 @@ async function initDb() {
   try { await db.run("DROP TABLE IF EXISTS company_results"); } catch (err) {}
   try { await db.run("DROP TABLE IF EXISTS scores"); } catch (err) {}
 
+  // Fix PostgreSQL Sequences (Often broken during manual migrations from SQLite to Postgres)
+  const tablesWithSerial = ['users', 'teams', 'companies', 'bids', 'allocations', 'trades'];
+  for (const table of tablesWithSerial) {
+    try {
+      await db.run(`SELECT setval(pg_get_serial_sequence('${table}', 'id'), COALESCE((SELECT MAX(id) FROM ${table}), 1), COALESCE((SELECT MAX(id) FROM ${table}) IS NOT NULL, false))`);
+    } catch (e) {
+      // Ingore if not Postgres or sequence doesn't exist
+    }
+  }
+
   console.log('Database initialized successfully.');
   
   const bcrypt = require('bcrypt');
