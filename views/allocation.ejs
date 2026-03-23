@@ -9,8 +9,8 @@
     <div class="card bg-dark text-white shadow-lg border-0 rounded-4">
       <div class="card-body p-4">
         <h6 class="text-uppercase text-gray-400 fw-bold mb-1">Target Purse to Allocate</h6>
-        <h2 class="fw-bold mb-0 text-success" id="totalPurseDisplay">$<%= locals.team.purse.toLocaleString() %></h2>
-        <input type="hidden" id="maxPurse" value="<%= locals.team.purse %>">
+        <h2 class="fw-bold mb-0 text-success" id="totalPurseDisplay">$<%= team.allocation_purse.toLocaleString() %></h2>
+        <input type="hidden" id="maxPurse" value="<%= team.allocation_purse %>">
       </div>
     </div>
   </div>
@@ -37,9 +37,19 @@
             <% ownedCompanies.forEach(company => { %>
               <div class="mb-4">
                 <label class="form-label fw-bold fs-5 text-dark"><%= company.name %></label>
-                <div class="input-group input-group-lg shadow-sm">
-                  <span class="input-group-text bg-light border-0 text-secondary fw-bold">$</span>
-                  <input type="number" step="0.01" class="form-control border-0 bg-light allocation-input" name="company_<%= company.id %>" value="0" min="0" required>
+                <div class="row g-3">
+                  <div class="col-sm-4">
+                    <div class="input-group input-group-lg shadow-sm">
+                      <input type="number" step="0.01" class="form-control border-0 bg-light pct-input" data-id="<%= company.id %>" placeholder="%" min="0" max="100">
+                      <span class="input-group-text bg-light border-0 text-secondary fw-bold">%</span>
+                    </div>
+                  </div>
+                  <div class="col-sm-8">
+                    <div class="input-group input-group-lg shadow-sm">
+                      <span class="input-group-text bg-light border-0 text-secondary fw-bold">$</span>
+                      <input type="number" step="0.01" class="form-control border-0 bg-light allocation-input" name="company_<%= company.id %>" id="cash_<%= company.id %>" value="0" min="0" required>
+                    </div>
+                  </div>
                 </div>
               </div>
             <% }) %>
@@ -53,7 +63,7 @@
 
             <div class="d-flex justify-content-between align-items-center mb-4 p-4 rounded-4" style="background: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%);">
               <span class="fs-5 fw-semibold text-secondary">Remaining to Allocate:</span>
-              <span class="fs-3 fw-bold text-danger" id="remainingSum">$<%= locals.team.purse.toLocaleString() %></span>
+              <span class="fs-3 fw-bold text-danger" id="remainingSum">$<%= team.allocation_purse.toLocaleString() %></span>
             </div>
 
             <button type="submit" class="btn btn-primary btn-lg w-100 rounded-pill fw-bold shadow-sm py-3" id="submitBtn" disabled>
@@ -70,6 +80,7 @@
 <script>
   document.addEventListener('DOMContentLoaded', () => {
     const inputs = document.querySelectorAll('.allocation-input');
+    const pctInputs = document.querySelectorAll('.pct-input');
     const allocatedSumEl = document.getElementById('allocatedSum');
     const remainingSumEl = document.getElementById('remainingSum');
     const submitBtn = document.getElementById('submitBtn');
@@ -86,7 +97,6 @@
       allocatedSumEl.textContent = '$' + sum.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2});
       remainingSumEl.textContent = '$' + remaining.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2});
 
-      // Allow a small float tolerance
       if (Math.abs(remaining) < 0.01) {
         remainingSumEl.className = 'fs-3 fw-bold text-success';
         submitBtn.disabled = false;
@@ -96,8 +106,26 @@
       }
     }
 
+    pctInputs.forEach(pct => {
+      pct.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value) || 0;
+        const id = e.target.getAttribute('data-id');
+        const cashInput = document.getElementById('cash_' + id);
+        cashInput.value = ((val / 100) * maxPurse).toFixed(2);
+        updateSums();
+      });
+    });
+
     inputs.forEach(input => {
-      input.addEventListener('input', updateSums);
+      input.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value) || 0;
+        const id = e.target.name.replace('company_', '');
+        const pctInput = document.querySelector(`.pct-input[data-id="${id}"]`);
+        if (pctInput && document.activeElement !== pctInput) {
+          pctInput.value = maxPurse ? ((val / maxPurse) * 100).toFixed(2) : 0;
+        }
+        updateSums();
+      });
     });
   });
 </script>

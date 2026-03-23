@@ -122,8 +122,35 @@ router.post('/assign-bid', catchAsync(async (req, res) => {
 router.post('/set-phase', catchAsync(async (req, res) => {
   const { phase } = req.body;
   const db = await getDb();
+  
+  const sys = await db.get('SELECT current_phase FROM system_control LIMIT 1');
+  if (sys && sys.current_phase === 'auction' && phase === 'allocation') {
+    // Rollover cash upon transition
+    await db.run('UPDATE teams SET allocation_purse = allocation_purse + purse_remaining, purse_remaining = 0');
+    req.session.successMsg = `Phase changed to ${phase}. Unspent bidding funds rolled over to allocation purses.`;
+  } else {
+    req.session.successMsg = `Phase changed to ${phase}.`;
+  }
+
   await db.run('UPDATE system_control SET current_phase = $1', [phase]);
-  req.session.successMsg = `Phase changed to ${phase}.`;
+  res.redirect('/admin/dashboard');
+}));
+
+// POST /admin/update-default-purses
+router.post('/update-default-purses', catchAsync(async (req, res) => {
+  const { bidding_purse, allocation_purse } = req.body;
+  const db = await getDb();
+  await db.run('UPDATE system_control SET default_bidding_purse = $1, default_allocation_purse = $2', [parseFloat(bidding_purse), parseFloat(allocation_purse)]);
+  req.session.successMsg = 'Global default purses updated successfully.';
+  res.redirect('/admin/dashboard');
+}));
+
+// POST /admin/update-team-purse
+router.post('/update-team-purse', catchAsync(async (req, res) => {
+  const { team_id, bidding_purse, allocation_purse } = req.body;
+  const db = await getDb();
+  await db.run('UPDATE teams SET purse_remaining = $1, allocation_purse = $2 WHERE id = $3', [parseFloat(bidding_purse), parseFloat(allocation_purse), team_id]);
+  req.session.successMsg = 'Team purses updated successfully.';
   res.redirect('/admin/dashboard');
 }));
 
@@ -141,54 +168,74 @@ router.post('/set-live-company', catchAsync(async (req, res) => {
   res.redirect('/admin/dashboard');
 }));
 
-// POST /admin/add-results
-router.post('/add-results', catchAsync(async (req, res) => {
-  const { company_id, stock_price, revenue, yoy_growth, ebitda, market_cap, market_share } = req.body;
+
+
+// POST /admin/delete-team
+router.post('/delete-team', catchAsync(async (req, res) => {
+  const { team_id } = req.body;
   const db = await getDb();
-  
+  await db.exec('BEGIN TRANSACTION');
   try {
-    await db.run(`INSERT INTO company_results 
-      (company_id, stock_price, revenue, yoy_growth, ebitda, market_cap, market_share) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      ON CONFLICT(company_id) DO UPDATE SET 
-      stock_price=excluded.stock_price, revenue=excluded.revenue, yoy_growth=excluded.yoy_growth, 
-      ebitda=excluded.ebitda, market_cap=excluded.market_cap, market_share=excluded.market_share`,
-      [company_id, stock_price, revenue, yoy_growth, ebitda, market_cap, market_share]
-    );
-    req.session.successMsg = 'Company results updated successfully.';
-  } catch(err) {
-    req.session.errorMsg = 'Error updating company results.';
+    const team = await db.get('SELECT * FROM teams WHERE id = $1', [team_id]);
+    if (team) {
+      await db.run('DELETE FROM bids WHERE team_id = $1', [team_id]);
+      await db.run('DELETE FROM allocations WHERE team_id = $1', [team_id]);
+      await db.run('DELETE FROM scores WHERE team_id = $1', [team_id]);
+      await db.run('DELETE FROM teams WHERE id = $1', [team_id]);
+      await db.run('DELETE FROM users WHERE id = $1', [team.user_id]);
+    }
+    await db.exec('COMMIT');
+    req.session.successMsg = 'Team deleted completely.';
+  } catch (err) {
+    await db.exec('ROLLBACK');
+    req.session.errorMsg = 'Error deleting team.';
   }
   res.redirect('/admin/dashboard');
 }));
 
-// POST /admin/calculate-scores
-router.post('/calculate-scores', catchAsync(async (req, res) => {
+// POST /admin/delete-company
+router.post('/delete-company', catchAsync(async (req, res) => {
+  const { company_id } = req.body;
   const db = await getDb();
-  
-  // Clear old scores
-  await db.run('DELETE FROM scores');
-  
-  const teams = await db.all('SELECT * FROM teams');
-  for (let team of teams) {
-    const allocations = await db.all('SELECT * FROM allocations WHERE team_id = $1', [team.id]);
-    let totalScore = 0;
-    
-    for (let alloc of allocations) {
-      const result = await db.get('SELECT * FROM company_results WHERE company_id = $1', [alloc.company_id]);
-      if (result) {
-        const companyScore = alloc.allocated_amount * (
-          result.stock_price + result.revenue + result.yoy_growth + result.ebitda + result.market_cap + result.market_share
-        );
-        totalScore += companyScore;
-      }
+  await db.exec('BEGIN TRANSACTION');
+  try {
+    const bids = await db.all('SELECT * FROM bids WHERE company_id = $1', [company_id]);
+    for (let bid of bids) {
+      await db.run('UPDATE teams SET purse_remaining = purse_remaining + $1 WHERE id = $2', [bid.bid_amount, bid.team_id]);
     }
-    
-    await db.run('INSERT INTO scores (team_id, total_score) VALUES ($1, $2)', [team.id, totalScore]);
+    await db.run('DELETE FROM bids WHERE company_id = $1', [company_id]);
+    await db.run('DELETE FROM allocations WHERE company_id = $1', [company_id]);
+    await db.run('UPDATE system_control SET live_company_id = NULL WHERE live_company_id = $1', [company_id]);
+    await db.run('DELETE FROM company_results WHERE company_id = $1', [company_id]);
+    await db.run('DELETE FROM companies WHERE id = $1', [company_id]);
+    await db.exec('COMMIT');
+    req.session.successMsg = 'Company deleted successfully.';
+  } catch (err) {
+    await db.exec('ROLLBACK');
+    req.session.errorMsg = 'Error deleting company.';
   }
-  
-  req.session.successMsg = 'Scores calculated successfully. Viewing final Leaderboard!';
-  res.redirect('/leaderboard');
+  res.redirect('/admin/dashboard');
+}));
+
+// POST /admin/revoke-bid
+router.post('/revoke-bid', catchAsync(async (req, res) => {
+  const { bid_id } = req.body;
+  const db = await getDb();
+  await db.exec('BEGIN TRANSACTION');
+  try {
+    const bid = await db.get('SELECT * FROM bids WHERE id = $1', [bid_id]);
+    if (bid) {
+      await db.run('UPDATE teams SET purse_remaining = purse_remaining + $1 WHERE id = $2', [bid.bid_amount, bid.team_id]);
+      await db.run('DELETE FROM allocations WHERE team_id = $1 AND company_id = $2', [bid.team_id, bid.company_id]);
+      await db.run('DELETE FROM bids WHERE id = $1', [bid_id]);
+    }
+    await db.exec('COMMIT');
+    req.session.successMsg = 'Bid revoked successfully. Funds returned to team.';
+  } catch (err) {
+    await db.exec('ROLLBACK');
+    req.session.errorMsg = 'Error revoking bid.';
+  }
+  res.redirect('/admin/dashboard');
 }));
 
 module.exports = router;

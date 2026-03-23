@@ -34,8 +34,12 @@ router.post('/login', catchErrors(async (req, res) => {
     
     // Auto-create a team if it doesn't exist
     if (!team) {
+      const sys = await db.get('SELECT default_bidding_purse, default_allocation_purse FROM system_control LIMIT 1');
+      const bPurse = sys ? sys.default_bidding_purse : 1000000;
+      const aPurse = sys ? sys.default_allocation_purse : 2000000;
+      
       const teamName = `${user.username}_team`;
-      await db.run('INSERT INTO teams (team_name, user_id) VALUES ($1, $2)', [teamName, user.id]);
+      await db.run('INSERT INTO teams (team_name, user_id, purse_remaining, allocation_purse) VALUES ($1, $2, $3, $4)', [teamName, user.id, bPurse, aPurse]);
       team = await db.get('SELECT * FROM teams WHERE user_id = $1', [user.id]);
     }
     
